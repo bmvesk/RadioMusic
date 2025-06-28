@@ -391,7 +391,8 @@ uint16_t checkInterface() {
 			audioEngine.skipTo(0);
 		} else {
 			D(Serial.print("Skip to ");Serial.println(interface.start););
-			audioEngine.skipTo(interface.start);
+			// audioEngine.skipTo(interface.start);
+			audioEngine.skipTo(0);
 		}
 		digitalWrite(RESET_CV, HIGH);
 		trigCnt = 0;
