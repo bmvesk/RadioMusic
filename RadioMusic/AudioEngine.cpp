@@ -184,6 +184,7 @@ void AudioEngine::changeTo(AudioFileInfo* fileInfo, unsigned long start) {
 		Serial.print(previousPlayer->rawfile.name());
 		Serial.println();
 	);
+	isLoopStartFlg = true;
 
 }
 
@@ -250,4 +251,21 @@ float AudioEngine::getPeak() {
 	} else {
 		return 0;
 	}
+}
+
+boolean AudioEngine::isLoopStart() {
+	if (isLoopStartFlg) {
+		isLoopStartFlg = false;
+		return true;
+	} else {
+		return false;
+	}
+}
+
+boolean AudioEngine::isSeeked() {
+	return currentPlayer->isSeeked();
+}
+
+uint32_t AudioEngine::getPlayheadMillis() {
+    return currentPlayer->getPlayheadMillis();
 }

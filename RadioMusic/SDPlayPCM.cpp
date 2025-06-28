@@ -116,6 +116,7 @@ bool SDPlayPCM::skipTo(uint32_t dataPosition) {
 	__disable_irq()
 	;
 	boolean didseek = rawfile.seek(pos);
+	isSeekedFlg = true;
 	bytesLeftInFile = dataSize - dataPosition;
 	readPositionInBytes = 0;
 	bytesAvailable = 0;
@@ -234,6 +235,8 @@ void SDPlayPCM::restart() {
 	__disable_irq()
 	;
 	rawfile.seek(dataOffset);
+	isSeekedFlg = true;
+
 	bytesLeftInFile = dataSize;
 	playing = true;
 	finished = false;
@@ -599,6 +602,7 @@ bool SDPlayPCM::fillBuffer(int32_t requiredBytes) {
 
 				// Seek to start of file
 				rawfile.seek(dataOffset);
+				isSeekedFlg = true;
 
 				// get the bit thats left
 				int32_t lastBit = requiredBytes - read;
@@ -651,6 +655,7 @@ bool SDPlayPCM::fillBuffer(int32_t requiredBytes) {
 			}
 			// go to start of file
 			rawfile.seek(dataOffset);
+			isSeekedFlg = true;
 
 			spaceLeftInBuffer -= read;
 
@@ -730,6 +735,7 @@ bool SDPlayPCM::fillBuffer(int32_t requiredBytes) {
 			if (looping) {
 				// If we're looping, seek back to start and fill from there
 				rawfile.seek(dataOffset);
+				isSeekedFlg = true;
 
 				read2 = rawfile.read(&(audioBuffer[bufferFillPosition + read]),
 						requiredBytes - bytesLeftInFile);
@@ -863,4 +869,18 @@ void SDPlayPCM::debugHeader() {
 	Serial.print("SDP:");
 	Serial.print(playerID);
 	Serial.write(' ');
+}
+
+boolean SDPlayPCM::isSeeked() {
+	if (isSeekedFlg) {
+		isSeekedFlg = false;
+		playMillis = 0;
+		return true;
+	} else {
+		return false;
+	}
+}
+
+uint32_t SDPlayPCM::getPlayheadMillis() {
+    return playMillis;
 }

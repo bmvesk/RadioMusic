@@ -56,7 +56,7 @@ public:
 	boolean anyAudioFiles = true;
 
 	// Use reset CV as an output
-	boolean resetIsOutput = false;
+	boolean resetIsOutput = true;
 
 	// Only overrides if true. Force no crossfades.
 	boolean hardSwap = false;

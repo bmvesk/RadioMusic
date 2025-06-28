@@ -79,6 +79,17 @@ elapsedMillis ledFlashTimer = 0;
 elapsedMillis meterDisplayDelayTimer; // Counter to hide MeterDisplay after bank change
 elapsedMillis peakDisplayTimer; // COUNTER FOR PEAK METER FRAMERATE
 
+elapsedMillis trigCnt;
+elapsedMillis segCnt;
+uint32_t  fileMillis;
+uint32_t  fileMillisSeg;
+
+uint8_t segPos;
+int divideList[10] = {1,2,3,4,6,8,12,16,32,64};
+int divideIndex;
+int divide;
+uint32_t minInterval;
+boolean divideReload = false;
 
 int prevBankTimer = 0;
 boolean flashLeds = false;
@@ -240,6 +251,38 @@ void loop() {
 
 		resetLedTimer = 0;
 
+		fileMillis = currentFileInfo->getFileLengthMillis();
+		divideReload = true;
+	}
+
+	// indexマッピング
+	divideIndex = map(interface.start, 0, 8192, 0, 9); 
+	// index範囲確認（予防）
+	divideIndex = constrain(divideIndex, 0, 9); 
+
+	if(divide != divideList[divideIndex] || divideReload){
+		divide = divideList[divideIndex];
+		fileMillisSeg = fileMillis / divide;
+
+		// ★ 現在の再生位置に基づいてsegPosを調整（トリガーのズレ防止）
+		uint32_t currentMillis = audioEngine.getPlayheadMillis();
+		segPos = currentMillis / fileMillisSeg;
+		if (segPos >= divide) segPos = divide - 1; // 安全措置
+		divideReload = false;
+	}
+
+	if(audioEngine.isSeeked()){
+		digitalWrite(RESET_CV, HIGH);
+		trigCnt = 0;
+		segCnt = 0;
+		segPos = 1;
+	}else if(segPos < divide && segCnt >= (fileMillisSeg * segPos)){
+		digitalWrite(RESET_CV, HIGH);
+		trigCnt = 0;
+		segPos++;
+	}else if(trigCnt >= 4){
+		digitalWrite(RESET_CV, LOW);
+		// trigCnt = 0;
 	}
 
 }
@@ -350,6 +393,10 @@ uint16_t checkInterface() {
 			D(Serial.print("Skip to ");Serial.println(interface.start););
 			audioEngine.skipTo(interface.start);
 		}
+		digitalWrite(RESET_CV, HIGH);
+		trigCnt = 0;
+		segCnt = 0;
+		segPos = 1;
 
 	}
 

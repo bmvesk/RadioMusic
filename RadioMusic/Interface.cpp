@@ -26,7 +26,9 @@ void Interface::init(int fileSize, int channels, const Settings& settings, PlayS
 	pinMode(RESET_CV, settings.resetIsOutput ? OUTPUT : INPUT);
 
 	// Add an interrupt on the RESET_CV pin to catch rising edges
-	attachInterrupt(RESET_CV, resetcv, RISING);
+	if (!settings.resetIsOutput){
+		attachInterrupt(RESET_CV, resetcv, RISING);
+	}
 
 	uint16_t bounceInterval = 5;
 	resetButtonBounce.attach(RESET_BUTTON);

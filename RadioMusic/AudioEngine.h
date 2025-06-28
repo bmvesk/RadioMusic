@@ -68,11 +68,16 @@ class AudioEngine {
 		// Time elapsed since last switch / skip
 		elapsedMillis elapsed = 0;
 
+		boolean isLoopStart();
+		boolean isSeeked();
+		uint32_t getPlayheadMillis();
+
 	private:
 		uint16_t waitCount = 0;
 		boolean updateRequired = false;
 		AudioFileInfo* nextInfo;
 		Settings* settings;
+		boolean isLoopStartFlg = false;
 
 //		boolean hardSwap = false;
 //		boolean looping = false;

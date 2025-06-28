@@ -71,6 +71,9 @@ public:
 	volatile bool inUpdate = false;
 	volatile bool updateRequired = false;
 
+	bool isSeeked();
+	uint32_t getPlayheadMillis();
+
 private:
 	bool changeFileTo(AudioFileInfo* info, bool closeFirst);
 
@@ -109,6 +112,9 @@ private:
 	uint16_t spaceLeftInBuffer = 0;
 	int32_t bytesRequired = 0;
 	int32_t read = 0;
+
+	bool isSeekedFlg = false;
+	elapsedMillis playMillis;
 
 //	// Fixed point phase. 5 bit integer 11 bit fractional
 //	// This is phase in samples, not bytes.

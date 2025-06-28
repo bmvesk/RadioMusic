@@ -93,7 +93,23 @@ public:
 	uint32_t getBandwidth() {
 		return getSampleRate() * getBytesPerSample() * getChannels();
 	}
+	
+	uint32_t getFileLengthMillis () {
+		// return (size / getBandwidth()) * 1000;
+		// uint32_t sampleRate = 44100;    // Hz
+		// uint8_t channels = 2;           // ステレオ
+		// uint8_t bitDepth = 16;          // 16bit
 
+		// uint32_t bytesPerSecond = sampleRate * channels * (bitDepth / 8);
+
+		uint32_t lengthMillis = (size * 1000) / (44100 * 2 * (16 / 8));
+		return lengthMillis;
+	}
+	
+
+	uint32_t getFileLengthMillisSeg (int seg) {
+		return getFileLengthMillis() / seg;
+	}
 	// Packed format, Big endian.
 	// Bit 0 Mono / Stereo
 	// Bits 1 + 2 : Bit depth
