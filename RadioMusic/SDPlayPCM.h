@@ -115,6 +115,7 @@ private:
 
 	bool isSeekedFlg = false;
 	elapsedMillis playMillis;
+	uint32_t getPlayheadMillisFromOffset();
 
 //	// Fixed point phase. 5 bit integer 11 bit fractional
 //	// This is phase in samples, not bytes.

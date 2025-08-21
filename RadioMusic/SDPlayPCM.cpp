@@ -873,8 +873,10 @@ void SDPlayPCM::debugHeader() {
 
 boolean SDPlayPCM::isSeeked() {
 	if (isSeekedFlg) {
+		// Serial.println(getPlayheadMillisFromOffset());
 		isSeekedFlg = false;
-		playMillis = 0;
+		// playMillis = 0;
+		// playMillis = getPlayheadMillisFromOffset();
 		return true;
 	} else {
 		return false;
@@ -882,5 +884,22 @@ boolean SDPlayPCM::isSeeked() {
 }
 
 uint32_t SDPlayPCM::getPlayheadMillis() {
-    return playMillis;
+    // return playMillis;
+	return getPlayheadMillisFromOffset();
+}
+
+uint32_t SDPlayPCM::getPlayheadMillisFromOffset() {
+    float positionRatio = offset();  // 0.0〜1.0 の再生位置比
+
+    if (bytesPerSample == 0 || channels == 0 || sampleRateSpeed == 0.0f) return 0;
+
+    // 実際のサンプルレートを算出
+    float actualSampleRate = 44100.0f * sampleRateSpeed;
+
+    // サンプル総数 = バイト数 / (1サンプルあたりのバイト数)
+    uint32_t totalSamples = dataSize / (bytesPerSample * channels);
+
+    // ミリ秒に変換
+    float seconds = (positionRatio * totalSamples) / actualSampleRate;
+    return static_cast<uint32_t>(seconds * 1000.0f);  // 小数点以下は切り捨て
 }

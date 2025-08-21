@@ -83,12 +83,15 @@ elapsedMillis trigCnt;
 elapsedMillis segCnt;
 uint32_t  fileMillis;
 uint32_t  fileMillisSeg;
+uint32_t  fileMillisSegOld = UINT32_MAX;
 
 uint8_t segPos;
 int divideList[10] = {1,2,3,4,6,8,12,16,32,64};
 int divideIndex;
 int divide;
 uint32_t minInterval;
+uint32_t trigPoint;
+elapsedMillis mstCnt;
 boolean divideReload = false;
 
 int prevBankTimer = 0;
@@ -107,6 +110,8 @@ int NO_FILES = 0;
 uint8_t noFilesLedIndex = 0;
 
 uint8_t rebootCounter = 0;
+
+bool sampleChangePending = false;
 
 void setup() {
 
@@ -262,22 +267,49 @@ void loop() {
 
 	if(divide != divideList[divideIndex] || divideReload){
 		divide = divideList[divideIndex];
+		fileMillisSegOld = fileMillisSeg;
 		fileMillisSeg = fileMillis / divide;
+		minInterval = min(fileMillisSeg, fileMillisSegOld) / 2;
 
 		// ★ 現在の再生位置に基づいてsegPosを調整（トリガーのズレ防止）
 		uint32_t currentMillis = audioEngine.getPlayheadMillis();
-		segPos = currentMillis / fileMillisSeg;
-		if (segPos >= divide) segPos = divide - 1; // 安全措置
+		segPos = (currentMillis / fileMillisSeg) + 1; // segPosは1から
+		if (segPos > divide) segPos = divide - 1; // 安全措置
 		divideReload = false;
 	}
 
+	// ===== サンプル切替待機中のLED点滅 =====
+    if(sampleChangePending) {
+        if(ledFlashTimer < FLASHTIME*4) {
+            ledControl.multi(0x0F);
+        } else if(ledFlashTimer < FLASHTIME*8) {
+            ledControl.multi(0);
+        } else {
+            ledFlashTimer = 0;
+        }
+    }
+
 	if(audioEngine.isSeeked()){
-		digitalWrite(RESET_CV, HIGH);
+		// ループ終了タイミング
+        if(sampleChangePending) {
+			playState.channelChanged = true;
+            audioEngine.skipTo(0);  // サンプルリスタート
+            sampleChangePending = false;
+            flashLeds = false;    // 点滅終了
+        }
+
+		if((mstCnt - trigPoint) >= minInterval){
+			digitalWrite(RESET_CV, HIGH);
+			trigPoint = mstCnt;
+		}
 		trigCnt = 0;
 		segCnt = 0;
 		segPos = 1;
 	}else if(segPos < divide && segCnt >= (fileMillisSeg * segPos)){
-		digitalWrite(RESET_CV, HIGH);
+		if((mstCnt - trigPoint) >= minInterval){
+			digitalWrite(RESET_CV, HIGH);
+			trigPoint = mstCnt;
+		}
 		trigCnt = 0;
 		segPos++;
 	}else if(trigCnt >= 4){
@@ -379,7 +411,8 @@ uint16_t checkInterface() {
 
 	if(resetTriggered) {
 		if((changes & CHANNEL_CHANGED) || playState.nextChannel != playState.currentChannel) {
-			playState.channelChanged = true;
+			// playState.channelChanged = true;
+			sampleChangePending = true;
 		} else {
 			resetLedTimer = 0;
 		}
@@ -392,12 +425,13 @@ uint16_t checkInterface() {
 		} else {
 			D(Serial.print("Skip to ");Serial.println(interface.start););
 			// audioEngine.skipTo(interface.start);
-			audioEngine.skipTo(0);
+			// audioEngine.skipTo(0);
+			sampleChangePending = true;
 		}
-		digitalWrite(RESET_CV, HIGH);
-		trigCnt = 0;
-		segCnt = 0;
-		segPos = 1;
+		// digitalWrite(RESET_CV, HIGH);
+		// trigCnt = 0;
+		// segCnt = 0;
+		// segPos = 1;
 
 	}
 

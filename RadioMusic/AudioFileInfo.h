@@ -102,7 +102,8 @@ public:
 
 		// uint32_t bytesPerSecond = sampleRate * channels * (bitDepth / 8);
 
-		uint32_t lengthMillis = (size * 1000) / (44100 * 2 * (16 / 8));
+		// uint32_t lengthMillis = (size * 1000) / (44100 * 2 * (16 / 8));
+		uint32_t lengthMillis = (size * 1000) / (48000 * 2 * (16 / 8));
 		return lengthMillis;
 	}
 	
