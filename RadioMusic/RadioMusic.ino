@@ -79,20 +79,25 @@ elapsedMillis ledFlashTimer = 0;
 elapsedMillis meterDisplayDelayTimer; // Counter to hide MeterDisplay after bank change
 elapsedMillis peakDisplayTimer; // COUNTER FOR PEAK METER FRAMERATE
 
-elapsedMillis trigCnt;
-elapsedMillis segCnt;
 uint32_t  fileMillis;
 uint32_t  fileMillisSeg;
 uint32_t  fileMillisSegOld = UINT32_MAX;
 
-uint8_t segPos;
-int divideList[10] = {1,2,3,4,6,8,12,16,32,64};
+int divideList[11] = {1,2,3,4,6,8,12,16,32,64,128};
 int divideIndex;
 int divide;
-uint32_t minInterval;
-uint32_t trigPoint;
-elapsedMillis mstCnt;
+
 boolean divideReload = false;
+
+// ================================
+// PLAYHEAD BASED CLOCK
+// ================================
+uint32_t lastSegIndex = UINT32_MAX;
+elapsedMillis clockPulseTimer;
+bool clockHigh = false;
+
+const uint8_t CLOCK_PULSE_WIDTH = 4;
+
 
 int prevBankTimer = 0;
 boolean flashLeds = false;
@@ -311,6 +316,7 @@ void loop() {
 		AudioFileInfo* currentFileInfo = &fileScanner.fileInfos[playState.bank][playState.nextChannel];
 
 		audioEngine.changeTo(currentFileInfo, interface.start);
+		lastSegIndex = UINT32_MAX;
 		playState.channelChanged = false;
 
 		resetLedTimer = 0;
@@ -320,43 +326,23 @@ void loop() {
 	}
 
 	// indexマッピング
-	divideIndex = map(interface.start, 0, 8192, 0, 9); 
+	divideIndex = map(interface.start, 0, 8192, 0, 10);
 	// index範囲確認（予防）
-	divideIndex = constrain(divideIndex, 0, 9); 
+	divideIndex = constrain(divideIndex, 0, 10);
 
-	if(divide != divideList[divideIndex] || divideReload){
-		divide = divideList[divideIndex];
-		fileMillisSegOld = fileMillisSeg;
-		fileMillisSeg = fileMillis / divide;
-		minInterval = min(fileMillisSeg, fileMillisSegOld) / 2;
-
-		// ★ 現在の再生位置に基づいてsegPosを調整（トリガーのズレ防止）
-		uint32_t currentMillis = audioEngine.getPlayheadMillis();
-		segPos = (currentMillis / fileMillisSeg) + 1; // segPosは1から
-		if (segPos > divide) segPos = divide - 1; // 安全措置
-		divideReload = false;
-	}
-
-	// ===== サンプル/バンク切替待機中のLED点滅 =====
-	// if(sampleChangePending || bankChangePending) {
-	// 	if(ledFlashTimer < FLASHTIME*4) {
-	// 		ledControl.multi(0x0F); // 全点灯
-	// 	} else if(ledFlashTimer < FLASHTIME*8) {
-	// 		ledControl.multi(0);
-	// 	} else {
-	// 		ledFlashTimer = 0;
-	// 	}
-	// }
+	divide = divideList[divideIndex];
 	
 	if(audioEngine.isSeeked()){
     // ループ終了タイミング
 
 		ledControl.showReset(true);   // ★ ループ先頭でLED点灯
 		resetLedTimer = 0;            // タイマーリセット
+		lastSegIndex = UINT32_MAX; // ★ ループ先頭で必ずクロックを出す
 
 		if(sampleChangePending) {
 			playState.channelChanged = true;
 			audioEngine.skipTo(0);  // サンプルリスタート
+			lastSegIndex = UINT32_MAX;
 			sampleChangePending = false;
 			flashLeds = false;
 		}
@@ -375,29 +361,48 @@ void loop() {
 			flashLeds = false;   // LED点滅終了
 		}
 
-		if((mstCnt - trigPoint) >= minInterval){
-			digitalWrite(RESET_CV, HIGH);
-			trigPoint = mstCnt;
-		}
-		trigCnt = 0;
-		segCnt = 0;
-		segPos = 1;
-	}else if(segPos < divide && segCnt >= (fileMillisSeg * segPos)){
-		if((mstCnt - trigPoint) >= minInterval){
-			digitalWrite(RESET_CV, HIGH);
-			trigPoint = mstCnt;
-		}
-		trigCnt = 0;
-		segPos++;
-	}else if(trigCnt >= 4){
-		digitalWrite(RESET_CV, LOW);
-		// trigCnt = 0;
 	}
+
+
 
 	// --- Reset LEDの自動消灯処理 ---
 	if (resetLedTimer > 100) { // 100ms以上経過したら消灯
 		ledControl.showReset(false);
 	}
+
+	
+	// =====================================
+	// UNIFORM CLOCK GENERATOR (FINAL)
+	// =====================================
+
+	if (fileMillis > 0 && divide > 0) {
+
+		uint32_t playheadMs = audioEngine.getPlayheadMillis();
+
+		// セグメント番号（均等分割）
+		uint32_t segmentIndex =
+			(uint64_t)playheadMs * divide / fileMillis;
+
+		if (segmentIndex >= (uint32_t)divide)
+			segmentIndex = divide - 1;
+
+		// ---- セグメント更新検出 ----
+		if (segmentIndex != lastSegIndex) {
+
+			digitalWrite(RESET_CV, HIGH);
+			clockPulseTimer = 0;
+			clockHigh = true;
+
+			lastSegIndex = segmentIndex;
+		}
+	}
+
+	// ---- パルスOFF ----
+	if (clockHigh && clockPulseTimer >= CLOCK_PULSE_WIDTH) {
+		digitalWrite(RESET_CV, LOW);
+		clockHigh = false;
+	}
+
 
 }
 
@@ -580,10 +585,9 @@ uint16_t checkInterface() {
 	if(skipToStartPoint && !playState.channelChanged) {
 		if(settings.pitchMode) {
 			audioEngine.skipTo(0);
+			lastSegIndex = UINT32_MAX;
 		} else {
 			D(Serial.print("Skip to ");Serial.println(interface.start););
-			// audioEngine.skipTo(interface.start);
-			// audioEngine.skipTo(0);
 			sampleChangePending = true;
 		}
 	}
@@ -591,9 +595,8 @@ uint16_t checkInterface() {
 	if (changes & CHANNEL_CV_TRIGGERED) {
 		// TODOリセット用関数作る
 		audioEngine.skipTo(0);
-		trigCnt = 0;
-		segCnt = 0;
-		segPos = 1;
+		// ★ クロック位相をリセットするだけ
+    	lastSegIndex = UINT32_MAX;
 	}
 
 	return changes;
