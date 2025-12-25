@@ -98,21 +98,29 @@ uint16_t Interface::update() {
 
 uint16_t Interface::updateChannelControls() {
 
-	boolean channelCVChanged = channelCVInput.update();
+	// boolean channelCVChanged = channelCVInput.update();
 	boolean channelPotChanged = channelPotInput.update();
 
 	uint16_t channelChanged = 0;
 
-	if(channelCVChanged || channelPotChanged) {
-		int channel = (int) constrain(channelCVInput.currentValue + channelPotInput.currentValue, 0, channelCount - 1);
+	
+
+	// if(channelCVChanged || channelPotChanged) {
+	// 	int channel = (int) constrain(channelCVInput.currentValue + channelPotInput.currentValue, 0, channelCount - 1);
+	if(channelPotChanged) {
+    	int channel = constrain(channelPotInput.currentValue, 0, channelCount - 1);
 
 		if (channel != playState->currentChannel) {
 			D(Serial.print("Channel ");Serial.println(channel););
 			playState->nextChannel = channel;
 			channelChanged |= CHANNEL_CHANGED;
-			if((channelPotImmediate && channelPotChanged) || (channelCVImmediate && channelCVChanged)) {
+			// if((channelPotImmediate && channelPotChanged) || (channelCVImmediate && channelCVChanged)) {
+			// 	playState->channelChanged = true;
+			// }
+			if(channelPotImmediate && channelPotChanged) {
 				playState->channelChanged = true;
 			}
+
 		} else {
 			D(
 				Serial.print("Channel change flag but channel is the same: ");
@@ -264,3 +272,27 @@ uint16_t Interface::updateButton() {
 
     return buttonState;
 }
+
+uint16_t Interface::updateChannelCVTrigger() {
+
+	boolean channelCVChanged = channelCVInput.update();
+
+    static int lastValue = 0;
+    const int threshold = 205; // 1V 相当（12bit ADC: 4096 * 1/5 ≈ 819 → Teensyの3.3Vなら約205）
+
+    int value = channelCVInput.inputValue;
+    uint16_t changes = 0;
+
+	if(channelCVChanged) {
+		// 立ち上がり検出
+		if (lastValue < threshold && value >= threshold) {
+			changes |= CHANNEL_CV_TRIGGERED;
+		}
+	}
+
+    lastValue = value;
+    return changes;
+}
+
+
+

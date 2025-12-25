@@ -35,6 +35,7 @@
 #define LONG_PRESS_PULSE_DELAY 600
 
 #define SAMPLEAVERAGE   16 	// How many values are read and averaged of pot/CV inputs each interface check.
+#define CHANNEL_CV_TRIGGERED  0x2000
 
 class Interface {
 public:
@@ -66,6 +67,8 @@ public:
 
 	uint16_t update();
 	uint16_t updateButton();
+	// トリガー入力用
+    uint16_t updateChannelCVTrigger();
 private:
 	AnalogInput channelCVInput;
 	AnalogInput channelPotInput;

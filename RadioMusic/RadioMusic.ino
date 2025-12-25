@@ -112,6 +112,65 @@ uint8_t noFilesLedIndex = 0;
 uint8_t rebootCounter = 0;
 
 bool sampleChangePending = false;
+bool bankChangePending = false;       // バンク切替待ちフラグ
+int nextBankIndex = -1;               // 切替予定バンク番号
+
+
+// --- グローバル変数 ---
+bool doubleBlinkActive = false;
+uint8_t blinkStep = 0;
+elapsedMillis blinkTimer;
+int prevSelected = -1;
+
+// --- 点滅時間（ms）チューニング用定数 ---
+// POT選択一致 → ダブル点滅
+const uint16_t BLINK_ON_TIME  = 100; // 点灯時間
+const uint16_t BLINK_OFF_TIME = 100; // 消灯時間
+const uint16_t BLINK_END_WAIT = 100; // 最終消灯から通常表示に戻るまで
+
+// 再生待機中 → 全LED点滅
+const uint16_t WAIT_BLINK_ON_TIME  = 50; // 点灯時間
+const uint16_t WAIT_BLINK_OFF_TIME = 50; // 消灯時間
+
+// LED物理接続が 0,1,2,3 に対して、左から右表示にしたい場合のマッピング
+const uint8_t ledMap[16] = {
+	0b0000, // 0
+	0b1000, // 1
+	0b0100, // 2
+	0b1100, // 3
+	0b0010, // 4
+	0b1010, // 5
+	0b0110, // 6
+	0b1110, // 7
+	0b0001, // 8
+	0b1001, // 9
+	0b0101, // 10
+	0b1101, // 11
+	0b0011, // 12
+	0b1011, // 13
+	0b0111, // 14
+	0b1111  // 15
+};
+const uint8_t ledBlinkMap[16] = {
+	0b1111, // 0
+	0b1000, // 1
+	0b0100, // 2
+	0b1100, // 3
+	0b0010, // 4
+	0b1010, // 5
+	0b0110, // 6
+	0b1110, // 7
+	0b0001, // 8
+	0b1001, // 9
+	0b0101, // 10
+	0b1101, // 11
+	0b0011, // 12
+	0b1011, // 13
+	0b0111, // 14
+	0b1111  // 15
+};
+
+bool hiPosForCurrentCh = true;
 
 void setup() {
 
@@ -278,25 +337,43 @@ void loop() {
 		divideReload = false;
 	}
 
-	// ===== サンプル切替待機中のLED点滅 =====
-    if(sampleChangePending) {
-        if(ledFlashTimer < FLASHTIME*4) {
-            ledControl.multi(0x0F);
-        } else if(ledFlashTimer < FLASHTIME*8) {
-            ledControl.multi(0);
-        } else {
-            ledFlashTimer = 0;
-        }
-    }
-
+	// ===== サンプル/バンク切替待機中のLED点滅 =====
+	// if(sampleChangePending || bankChangePending) {
+	// 	if(ledFlashTimer < FLASHTIME*4) {
+	// 		ledControl.multi(0x0F); // 全点灯
+	// 	} else if(ledFlashTimer < FLASHTIME*8) {
+	// 		ledControl.multi(0);
+	// 	} else {
+	// 		ledFlashTimer = 0;
+	// 	}
+	// }
+	
 	if(audioEngine.isSeeked()){
-		// ループ終了タイミング
-        if(sampleChangePending) {
+    // ループ終了タイミング
+
+		ledControl.showReset(true);   // ★ ループ先頭でLED点灯
+		resetLedTimer = 0;            // タイマーリセット
+
+		if(sampleChangePending) {
 			playState.channelChanged = true;
-            audioEngine.skipTo(0);  // サンプルリスタート
-            sampleChangePending = false;
-            flashLeds = false;    // 点滅終了
-        }
+			audioEngine.skipTo(0);  // サンプルリスタート
+			sampleChangePending = false;
+			flashLeds = false;
+		}
+
+		if(bankChangePending) {
+			if(nextBankIndex >= 0 && nextBankIndex <= fileScanner.lastBankIndex) {
+				playState.bank = nextBankIndex;
+				if (playState.nextChannel >= fileScanner.numFilesInBank[playState.bank])
+					playState.nextChannel = fileScanner.numFilesInBank[playState.bank] - 1;
+
+				interface.setChannelCount(fileScanner.numFilesInBank[playState.bank]);
+				playState.channelChanged = true;
+				// EEPROM.write(EEPROM_BANK_SAVE_ADDRESS, playState.bank);
+			}
+			bankChangePending = false;
+			flashLeds = false;   // LED点滅終了
+		}
 
 		if((mstCnt - trigPoint) >= minInterval){
 			digitalWrite(RESET_CV, HIGH);
@@ -317,6 +394,11 @@ void loop() {
 		// trigCnt = 0;
 	}
 
+	// --- Reset LEDの自動消灯処理 ---
+	if (resetLedTimer > 100) { // 100ms以上経過したら消灯
+		ledControl.showReset(false);
+	}
+
 }
 
 void updateInterfaceAndDisplay() {
@@ -325,31 +407,106 @@ void updateInterfaceAndDisplay() {
 	updateDisplay(changes);
 }
 
+// --- LED制御関数 ---
 void updateDisplay(uint16_t changes) {
-	if (showDisplay > SHOWFREQ) {
-		showDisplay = 0;
-	}
-	if (bankChangeMode) {
-		ledControl.showReset(1);// Reset led is on continuously when in bank change mode..
-		if(!flashLeds) {
-			ledControl.multi(playState.bank);
-		}
+    uint8_t selectedIndex = playState.nextChannel;
+    uint8_t currentIndex  = playState.currentChannel;
+	
 
-	} else {
-		ledControl.showReset(resetLedTimer < FLASHTIME); // flash reset LED
+    // POTが「再生中インデックス」に一致した瞬間に2回点滅開始
+    if (selectedIndex == currentIndex && selectedIndex != prevSelected) {
+        doubleBlinkActive = true;
+        blinkStep = 0;
+        blinkTimer = 0;
+    }
+    prevSelected = selectedIndex;
+
+	
+	if(selectedIndex > currentIndex && !hiPosForCurrentCh){
+		hiPosForCurrentCh = true;
+		doubleBlinkActive = true;
+		blinkStep = 0;
+		blinkTimer = 0;
 	}
 
-	if (flashLeds) {
-		if (ledFlashTimer < FLASHTIME * 4) {
-			ledControl.multi(0x0F);
-		} else if(ledFlashTimer < FLASHTIME * 8) {
+	if(selectedIndex < currentIndex && hiPosForCurrentCh){
+		hiPosForCurrentCh = false;
+		doubleBlinkActive = true;
+		blinkStep = 0;
+		blinkTimer = 0;
+	}
+
+    // --- 2回点滅処理（選択インデックス = 再生中インデックス） ---
+    if (doubleBlinkActive) {
+		uint8_t pattern = ledBlinkMap[currentIndex & 0x0F];
+
+        if (blinkStep == 0 && blinkTimer < BLINK_ON_TIME) {
+            ledControl.multi(pattern);
+			// ledControl.multi(0x0F);
+        } else if (blinkStep == 0 && blinkTimer >= BLINK_ON_TIME) {
+            ledControl.multi(0);
+            blinkStep = 1;
+            blinkTimer = 0;
+        } else if (blinkStep == 1 && blinkTimer < BLINK_OFF_TIME) {
 			ledControl.multi(0);
-		} else {
-			ledFlashTimer = 0;
+        } else if (blinkStep == 1 && blinkTimer >= BLINK_OFF_TIME) {
+			ledControl.multi(pattern);
+            // ledControl.multi(0x0F);
+            blinkStep = 2;
+            blinkTimer = 0;
+        } else if (blinkStep == 2 && blinkTimer >= BLINK_ON_TIME) {
+            ledControl.multi(0);
+			blinkStep = 3;
+			blinkTimer = 0;
+        } else if (blinkStep == 3 && blinkTimer >= BLINK_END_WAIT) {
+            doubleBlinkActive = false;
+        }
+        return; // 点滅優先
+    }
+
+	// サンプル切替待ち点滅 (全点滅)
+	if (sampleChangePending) {
+		static bool waitBlinkOn = true;
+		static elapsedMillis waitBlinkTimer = 0;
+
+		if (waitBlinkOn && waitBlinkTimer < WAIT_BLINK_ON_TIME) {
+			ledControl.multi(0x0F); // 全LED点灯 (4つ分)
+		} else if (waitBlinkOn && waitBlinkTimer >= WAIT_BLINK_ON_TIME) {
+			ledControl.multi(0);
+			waitBlinkOn = false;
+			waitBlinkTimer = 0;
+		} else if (!waitBlinkOn && waitBlinkTimer < WAIT_BLINK_OFF_TIME) {
+			ledControl.multi(0);
+		} else if (!waitBlinkOn && waitBlinkTimer >= WAIT_BLINK_OFF_TIME) {
+			ledControl.multi(0x0F);
+			waitBlinkOn = true;
+			waitBlinkTimer = 0;
 		}
-	} else if (settings.showMeter && !bankChangeMode) {
-		peakMeter();
+		return;
 	}
+
+	// バンク切替待ち点滅 (チェイス表示)
+	if (bankChangePending) {
+		static uint8_t pos = 0;
+		static int8_t dir = 1;             // 進行方向 (1=右, -1=左)
+		static elapsedMillis runBlinkTimer = 0;
+
+		if (runBlinkTimer > 50) {         // 0.05秒ごとに進む
+			pos += dir;
+			if (pos == 3) dir = -1;        // 右端で折り返し
+			else if (pos == 0) dir = 1;    // 左端で折り返し
+			runBlinkTimer = 0;
+		}
+
+		uint8_t pattern = (1 << pos);      // 1つだけ点灯
+		ledControl.multi(pattern);
+
+		return;
+	}
+
+    // --- 通常表示 ---
+	uint8_t ledPattern = ledMap[selectedIndex & 0x0F];
+	ledControl.multi(ledPattern);
 }
 
 // INTERFACE //
@@ -357,6 +514,7 @@ void updateDisplay(uint16_t changes) {
 uint16_t checkInterface() {
 
 	uint16_t changes = interface.update();
+	changes |= interface.updateChannelCVTrigger();
 
 	#ifdef RESET_TO_REBOOT
 	if (changes & BUTTON_SHORT_PRESS) {
@@ -428,11 +586,14 @@ uint16_t checkInterface() {
 			// audioEngine.skipTo(0);
 			sampleChangePending = true;
 		}
-		// digitalWrite(RESET_CV, HIGH);
-		// trigCnt = 0;
-		// segCnt = 0;
-		// segPos = 1;
+	}
 
+	if (changes & CHANNEL_CV_TRIGGERED) {
+		// TODOリセット用関数作る
+		audioEngine.skipTo(0);
+		trigCnt = 0;
+		segCnt = 0;
+		segPos = 1;
 	}
 
 	return changes;
@@ -448,29 +609,28 @@ void doSpeedChange() {
 }
 
 void nextBank() {
+    if(fileScanner.lastBankIndex == 0) {
+        D(Serial.println("Only 1 bank."););
+        return;
+    }
+    int candidate = playState.bank + 1;
+    if (candidate > fileScanner.lastBankIndex) {
+        candidate = 0;
+    }
+    if(fileScanner.numFilesInBank[candidate] == 0) {
+        D(Serial.print("No file in bank ");Serial.println(candidate););
+        playState.bank = candidate; // 空バンクをスキップ
+        nextBank();
+        return;
+    }
 
-	if(fileScanner.lastBankIndex == 0) {
-		D(Serial.println("Only 1 bank."););
-		return;
-	}
-	playState.bank++;
-	if (playState.bank > fileScanner.lastBankIndex) {
-		playState.bank = 0;
-	}
-	if(fileScanner.numFilesInBank[playState.bank] == 0) {
-		D(Serial.print("No file in bank ");Serial.println(playState.bank););
-		nextBank();
-	}
+    nextBankIndex = candidate;
+    bankChangePending = true;   // ★ 切替待ちフラグをセット
 
-	if (playState.nextChannel >= fileScanner.numFilesInBank[playState.bank])
-		playState.nextChannel = fileScanner.numFilesInBank[playState.bank] - 1;
-	interface.setChannelCount(fileScanner.numFilesInBank[playState.bank]);
-	playState.channelChanged = true;
-
-	D(
-		Serial.print("RM: Next Bank ");
-		Serial.println(playState.bank);
-	);
+    D(
+        Serial.print("RM: Next Bank (pending) ");
+        Serial.println(nextBankIndex);
+    );
 
 	meterDisplayDelayTimer = 0;
 	EEPROM.write(EEPROM_BANK_SAVE_ADDRESS, playState.bank);
