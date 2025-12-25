@@ -98,6 +98,11 @@ bool clockHigh = false;
 
 const uint8_t CLOCK_PULSE_WIDTH = 4;
 
+uint32_t playheadBaseMs = 0;
+bool playheadBaseValid = false;
+
+bool forceFirstClock = false;
+
 
 int prevBankTimer = 0;
 boolean flashLeds = false;
@@ -338,6 +343,7 @@ void loop() {
 		ledControl.showReset(true);   // ★ ループ先頭でLED点灯
 		resetLedTimer = 0;            // タイマーリセット
 		lastSegIndex = UINT32_MAX; // ★ ループ先頭で必ずクロックを出す
+		forceFirstClock = true;   // ★ 追加
 
 		if(sampleChangePending) {
 			playState.channelChanged = true;
@@ -372,22 +378,32 @@ void loop() {
 
 	
 	// =====================================
-	// UNIFORM CLOCK GENERATOR (FINAL)
+	// UNIFORM CLOCK GENERATOR (FINAL FIXED)
 	// =====================================
 
 	if (fileMillis > 0 && divide > 0) {
 
 		uint32_t playheadMs = audioEngine.getPlayheadMillis();
 
-		// セグメント番号（均等分割）
 		uint32_t segmentIndex =
 			(uint64_t)playheadMs * divide / fileMillis;
 
 		if (segmentIndex >= (uint32_t)divide)
 			segmentIndex = divide - 1;
 
-		// ---- セグメント更新検出 ----
-		if (segmentIndex != lastSegIndex) {
+		// ★ ループ直後の強制1発
+		if (forceFirstClock) {
+
+			digitalWrite(RESET_CV, HIGH);
+			clockPulseTimer = 0;
+			clockHigh = true;
+
+			lastSegIndex = segmentIndex;
+			forceFirstClock = false;
+
+		}
+		// 通常処理
+		else if (segmentIndex != lastSegIndex) {
 
 			digitalWrite(RESET_CV, HIGH);
 			clockPulseTimer = 0;
@@ -396,6 +412,7 @@ void loop() {
 			lastSegIndex = segmentIndex;
 		}
 	}
+
 
 	// ---- パルスOFF ----
 	if (clockHigh && clockPulseTimer >= CLOCK_PULSE_WIDTH) {
