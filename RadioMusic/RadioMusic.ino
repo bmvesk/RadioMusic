@@ -83,7 +83,8 @@ uint32_t  fileMillis;
 uint32_t  fileMillisSeg;
 uint32_t  fileMillisSegOld = UINT32_MAX;
 
-int divideList[11] = {1,2,3,4,6,8,12,16,32,64,128};
+// int divideList[11] = {1,2,3,4,6,8,12,16,32,64,128};
+int divideList[11] = {1,2,4,8,16,32,64,128,256,512,1024};
 int divideIndex;
 int divide;
 
@@ -98,6 +99,7 @@ bool clockHigh = false;
 
 uint32_t clockHighStartMs = 0;    // HIGH開始時刻（ミリ秒）
 uint32_t currentClockPulseWidthMs = 4; // 現在のパルス幅（ミリ秒）
+int lastDivideForPulse = 1; // パルス幅計算時の分割数
 
 uint32_t playheadBaseMs = 0;
 bool playheadBaseValid = false;
@@ -382,6 +384,13 @@ void loop() {
 	// UNIFORM CLOCK GENERATOR (FINAL FIXED)
 	// =====================================
 
+	// HIGH中に分割数が変わったら、パルス幅を即座に再計算
+	if (clockHigh && divide != lastDivideForPulse && fileMillis > 0) {
+		uint32_t intervalMs = fileMillis / divide;
+		currentClockPulseWidthMs = intervalMs / 2;
+		lastDivideForPulse = divide;
+	}
+
 	if (fileMillis > 0 && divide > 0) {
 
 		uint32_t playheadMs = audioEngine.getPlayheadMillis();
@@ -398,6 +407,7 @@ void loop() {
 			// パルス幅計算: 現在の分割数の1周期の半分
 			uint32_t intervalMs = fileMillis / divide;
 			currentClockPulseWidthMs = intervalMs / 2;
+			lastDivideForPulse = divide;
 			digitalWrite(RESET_CV, HIGH);
 			clockHighStartMs = millis();
 			clockHigh = true;
@@ -412,6 +422,7 @@ void loop() {
 			// パルス幅計算: 現在の分割数の1周期の半分
 			uint32_t intervalMs = fileMillis / divide;
 			currentClockPulseWidthMs = intervalMs / 2;
+			lastDivideForPulse = divide;
 			digitalWrite(RESET_CV, HIGH);
 			clockHighStartMs = millis();
 			clockHigh = true;
