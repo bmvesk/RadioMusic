@@ -96,7 +96,8 @@ uint32_t lastSegIndex = UINT32_MAX;
 elapsedMillis clockPulseTimer;
 bool clockHigh = false;
 
-const uint8_t CLOCK_PULSE_WIDTH = 4;
+uint32_t clockHighStartMs = 0;    // HIGH開始時刻（ミリ秒）
+uint32_t currentClockPulseWidthMs = 4; // 現在のパルス幅（ミリ秒）
 
 uint32_t playheadBaseMs = 0;
 bool playheadBaseValid = false;
@@ -394,8 +395,11 @@ void loop() {
 		// ★ ループ直後の強制1発
 		if (forceFirstClock) {
 
+			// パルス幅計算: 現在の分割数の1周期の半分
+			uint32_t intervalMs = fileMillis / divide;
+			currentClockPulseWidthMs = intervalMs / 2;
 			digitalWrite(RESET_CV, HIGH);
-			clockPulseTimer = 0;
+			clockHighStartMs = millis();
 			clockHigh = true;
 
 			lastSegIndex = segmentIndex;
@@ -405,8 +409,11 @@ void loop() {
 		// 通常処理
 		else if (segmentIndex != lastSegIndex) {
 
+			// パルス幅計算: 現在の分割数の1周期の半分
+			uint32_t intervalMs = fileMillis / divide;
+			currentClockPulseWidthMs = intervalMs / 2;
 			digitalWrite(RESET_CV, HIGH);
-			clockPulseTimer = 0;
+			clockHighStartMs = millis();
 			clockHigh = true;
 
 			lastSegIndex = segmentIndex;
@@ -415,9 +422,13 @@ void loop() {
 
 
 	// ---- パルスOFF ----
-	if (clockHigh && clockPulseTimer >= CLOCK_PULSE_WIDTH) {
-		digitalWrite(RESET_CV, LOW);
-		clockHigh = false;
+	if (clockHigh) {
+		// HIGH開始から現在までの経過（ミリ秒）
+		uint32_t elapsedMs = millis() - clockHighStartMs;
+		if (elapsedMs >= currentClockPulseWidthMs) {
+			digitalWrite(RESET_CV, LOW);
+			clockHigh = false;
+		}
 	}
 
 
