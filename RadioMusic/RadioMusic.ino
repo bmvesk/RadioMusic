@@ -100,6 +100,8 @@ bool clockHigh = false;
 uint32_t clockHighStartMs = 0;    // HIGH開始時刻（ミリ秒）
 uint32_t currentClockPulseWidthMs = 4; // 現在のパルス幅（ミリ秒）
 int lastDivideForPulse = 1; // パルス幅計算時の分割数
+uint32_t forceFirstClockInitialMs = 0; // 初回トリガーの初期化時刻（マイクロ秒）
+bool forceFirstClockDelayActive = false; // 初回トリガー遅延中フラグ
 
 uint32_t playheadBaseMs = 0;
 bool playheadBaseValid = false;
@@ -408,12 +410,20 @@ void loop() {
 			uint32_t intervalMs = fileMillis / divide;
 			currentClockPulseWidthMs = intervalMs / 2;
 			lastDivideForPulse = divide;
-			digitalWrite(RESET_CV, HIGH);
-			clockHighStartMs = millis();
-			clockHigh = true;
-
-			lastSegIndex = segmentIndex;
-			forceFirstClock = false;
+			// 初回トリガーのみ4000µsの補正ディレイ（ノンブロッキング）
+			if (!forceFirstClockDelayActive) {
+				// 遅延開始
+				forceFirstClockInitialMs = micros();
+				forceFirstClockDelayActive = true;
+			} else if ((uint32_t)(micros() - forceFirstClockInitialMs) >= 4000) {
+				// 4000µs経過したらトリガーを出力
+				digitalWrite(RESET_CV, HIGH);
+				clockHighStartMs = millis();
+				clockHigh = true;
+				lastSegIndex = segmentIndex;
+				forceFirstClock = false;
+				forceFirstClockDelayActive = false;
+			}
 
 		}
 		// 通常処理
