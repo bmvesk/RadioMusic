@@ -95,6 +95,7 @@ private:
 	uint16_t updateStartControls();
 	uint16_t updateRootControls();
 	boolean pitchMode = false;
+	boolean clockStepMode = false;
 };
 
 #endif

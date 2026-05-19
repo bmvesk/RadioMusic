@@ -107,6 +107,11 @@ uint32_t playheadBaseMs = 0;
 bool playheadBaseValid = false;
 
 bool forceFirstClock = false;
+bool suppressSeekedLoopHandling = false;
+bool clockStepSyncActive = false;
+uint32_t lastClockStepTriggerUs = 0;
+int32_t clockStepSegmentIndex = -1;
+int lastClockStepDivide = -1;
 
 
 int prevBankTimer = 0;
@@ -186,6 +191,104 @@ const uint8_t ledBlinkMap[16] = {
 };
 
 bool hiPosForCurrentCh = true;
+
+bool usesSpeedControlMode() {
+	return settings.pitchMode || settings.clockStepMode;
+}
+
+void handleClockStepTrigger() {
+	if (settings.resetIsOutput) {
+		digitalWrite(RESET_CV, HIGH);
+		clockHighStartMs = millis();
+		clockHigh = true;
+		currentClockPulseWidthMs = 4;
+	}
+	updateClockStepSpeedFromTrigger();
+	advanceToNextClockSegment();
+}
+
+void resetClockStepSync() {
+	clockStepSyncActive = false;
+	lastClockStepTriggerUs = 0;
+	clockStepSegmentIndex = -1;
+	if (settings.clockStepMode) {
+		audioEngine.setPlaybackSpeed(1.0f);
+	}
+}
+
+uint32_t getClockStepBaseSegmentMicros() {
+	if (audioEngine.currentFileInfo == NULL || divide <= 0) {
+		return 0;
+	}
+
+	uint32_t bandwidth = audioEngine.currentFileInfo->getBandwidth();
+	if (bandwidth == 0) {
+		return 0;
+	}
+
+	uint64_t totalMicros = ((uint64_t)audioEngine.currentFileInfo->size * 1000000ULL) / bandwidth;
+	return (uint32_t)(totalMicros / (uint64_t)divide);
+}
+
+void updateClockStepSpeedFromTrigger() {
+	if (!settings.clockStepMode || fileMillis == 0 || divide <= 0) {
+		return;
+	}
+
+	uint32_t nowUs = micros();
+	if (!clockStepSyncActive) {
+		clockStepSyncActive = true;
+		lastClockStepTriggerUs = nowUs;
+		return;
+	}
+
+	uint32_t triggerIntervalUs = nowUs - lastClockStepTriggerUs;
+	lastClockStepTriggerUs = nowUs;
+	if (triggerIntervalUs == 0) {
+		return;
+	}
+
+	uint32_t segmentLengthUs = getClockStepBaseSegmentMicros();
+	if (segmentLengthUs == 0) {
+		return;
+	}
+
+	float speed = (float)segmentLengthUs / (float)triggerIntervalUs;
+	if (speed < 0.01f) {
+		speed = 0.01f;
+	}
+
+	audioEngine.setPlaybackSpeed(speed);
+}
+
+bool advanceToNextClockSegment() {
+	if (fileMillis == 0 || divide <= 0 || audioEngine.currentFileInfo == NULL) {
+		return false;
+	}
+
+	uint32_t playheadMs = audioEngine.getPlayheadMillis();
+	uint32_t currentSegment = ((uint64_t)playheadMs * divide) / fileMillis;
+	if (currentSegment >= (uint32_t)divide) {
+		currentSegment = divide - 1;
+	}
+
+	if (settings.clockStepMode) {
+		if (clockStepSegmentIndex < 0 || clockStepSegmentIndex >= divide) {
+			clockStepSegmentIndex = currentSegment;
+		}
+		clockStepSegmentIndex = (clockStepSegmentIndex + 1) % divide;
+	} else {
+		clockStepSegmentIndex = (currentSegment + 1) % divide;
+	}
+
+	uint32_t nextSegment = (uint32_t)clockStepSegmentIndex;
+	uint32_t nextStart = ((uint64_t)nextSegment * 8192UL) / divide;
+
+	lastSegIndex = nextSegment;
+	suppressSeekedLoopHandling = true;
+	audioEngine.skipTo(nextStart);
+	return true;
+}
 
 void setup() {
 
@@ -333,6 +436,7 @@ void loop() {
 
 		fileMillis = currentFileInfo->getFileLengthMillis();
 		divideReload = true;
+		resetClockStepSync();
 	}
 
 	// indexマッピング
@@ -341,8 +445,15 @@ void loop() {
 	divideIndex = constrain(divideIndex, 0, 10);
 
 	divide = divideList[divideIndex];
+	if (settings.clockStepMode && divide != lastClockStepDivide) {
+		resetClockStepSync();
+	}
+	lastClockStepDivide = divide;
 	
 	if(audioEngine.isSeeked()){
+		if (suppressSeekedLoopHandling) {
+			suppressSeekedLoopHandling = false;
+		} else {
     // ループ終了タイミング
 
 		ledControl.showReset(true);   // ★ ループ先頭でLED点灯
@@ -371,6 +482,7 @@ void loop() {
 			bankChangePending = false;
 			flashLeds = false;   // LED点滅終了
 		}
+		}
 
 	}
 
@@ -393,7 +505,7 @@ void loop() {
 		lastDivideForPulse = divide;
 	}
 
-	if (fileMillis > 0 && divide > 0) {
+	if (fileMillis > 0 && divide > 0 && !(settings.clockStepMode && clockStepSyncActive)) {
 
 		uint32_t playheadMs = audioEngine.getPlayheadMillis();
 
@@ -603,14 +715,15 @@ uint16_t checkInterface() {
 
 	bool skipToStartPoint = false;
 	bool speedChange = false;
+	bool speedControlMode = usesSpeedControlMode();
 
-	if(settings.pitchMode) {
+	if(speedControlMode) {
 
-		if(resetTriggered) {
+		if(resetTriggered && settings.pitchMode && !settings.clockStepMode) {
 			skipToStartPoint = true;
 		}
 
-		if((changes & (ROOT_NOTE_CHANGED | ROOT_POT_CHANGED | ROOT_CV_CHANGED) ) || resetTriggered) {
+		if(settings.pitchMode && ((changes & (ROOT_NOTE_CHANGED | ROOT_POT_CHANGED | ROOT_CV_CHANGED) ) || resetTriggered)) {
 			speedChange = true;
 		}
 
@@ -626,13 +739,17 @@ uint16_t checkInterface() {
 			// playState.channelChanged = true;
 			sampleChangePending = true;
 		} else {
-			resetLedTimer = 0;
+			if(settings.clockStepMode) {
+				handleClockStepTrigger();
+			} else {
+				resetLedTimer = 0;
+			}
 		}
 	}
 
 	if(speedChange) doSpeedChange();
 	if(skipToStartPoint && !playState.channelChanged) {
-		if(settings.pitchMode) {
+		if(settings.pitchMode && !settings.clockStepMode) {
 			audioEngine.skipTo(0);
 			lastSegIndex = UINT32_MAX;
 		} else {
@@ -642,10 +759,14 @@ uint16_t checkInterface() {
 	}
 
 	if (changes & CHANNEL_CV_TRIGGERED) {
-		// TODOリセット用関数作る
-		audioEngine.skipTo(0);
-		// ★ クロック位相をリセットするだけ
-    	lastSegIndex = UINT32_MAX;
+		if (settings.clockStepMode) {
+			handleClockStepTrigger();
+		} else {
+			// TODOリセット用関数作る
+			audioEngine.skipTo(0);
+			// ★ クロック位相をリセットするだけ
+	    	lastSegIndex = UINT32_MAX;
+		}
 	}
 
 	return changes;

@@ -51,6 +51,9 @@ public:
 	// Use start pot and cv to control speed instead of start point
 	boolean pitchMode = false;
 
+	// Advance playback to the next clock segment on each reset trigger.
+	boolean clockStepMode = false;
+
 	// If this is true we'll read any .wav files and try to play them
 	// if not we'll only play 44khz, 16bit mono files
 	boolean anyAudioFiles = true;

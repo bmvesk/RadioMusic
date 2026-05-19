@@ -38,8 +38,9 @@ void Interface::init(int fileSize, int channels, const Settings& settings, PlayS
 	startCVDivider = settings.startCVDivider * (ADC_MAX_VALUE / 1024);
 
 	pitchMode = settings.pitchMode;
+	clockStepMode = settings.clockStepMode;
 
-    if(pitchMode) {
+	if(pitchMode) {
         quantiseRootCV = settings.quantiseRootCV;
         quantiseRootPot = settings.quantiseRootPot;
 
@@ -82,7 +83,12 @@ void Interface::setChannelCount(uint16_t count) {
 uint16_t Interface::update() {
 
 	uint16_t channelChanged = updateChannelControls();
-	uint16_t startChanged = pitchMode ? updateRootControls() : updateStartControls();
+	uint16_t startChanged = 0;
+	if (pitchMode) {
+		startChanged = updateRootControls();
+	} else {
+		startChanged = updateStartControls();
+	}
 
 	changes = channelChanged;
 	changes |= startChanged;

@@ -13,6 +13,14 @@ add 'pitchMode=1' to the config.
 
 In pitchMode any retrigger (either button or RESET input) will play the file from the start.
 
+Clock Step Mode
+---------------
+
+add 'clockStepMode=1' to the config.
+
+In clockStepMode each retrigger advances playback to the next clock segment instead of jumping back to the start.
+The TIME control is also used for speed control in this mode.
+
 Wav Files 
 ---------
 
