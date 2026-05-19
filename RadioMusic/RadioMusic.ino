@@ -112,6 +112,7 @@ bool clockStepSyncActive = false;
 uint32_t lastClockStepTriggerUs = 0;
 int32_t clockStepSegmentIndex = -1;
 int lastClockStepDivide = -1;
+float clockStepSmoothedSpeed = 1.0f;
 
 
 int prevBankTimer = 0;
@@ -196,6 +197,31 @@ bool usesSpeedControlMode() {
 	return settings.pitchMode || settings.clockStepMode;
 }
 
+bool applyPendingSelectionChangeNow() {
+	bool switched = false;
+
+	if (bankChangePending) {
+		if(nextBankIndex >= 0 && nextBankIndex <= fileScanner.lastBankIndex) {
+			playState.bank = nextBankIndex;
+			if (playState.nextChannel >= fileScanner.numFilesInBank[playState.bank])
+				playState.nextChannel = fileScanner.numFilesInBank[playState.bank] - 1;
+
+			interface.setChannelCount(fileScanner.numFilesInBank[playState.bank]);
+		}
+		bankChangePending = false;
+		switched = true;
+	}
+
+	if (!sampleChangePending && !switched) {
+		return false;
+	}
+
+	sampleChangePending = false;
+	flashLeds = false;
+	playState.channelChanged = true;
+	return true;
+}
+
 void handleClockStepTrigger() {
 	if (settings.resetIsOutput) {
 		digitalWrite(RESET_CV, HIGH);
@@ -211,6 +237,7 @@ void resetClockStepSync() {
 	clockStepSyncActive = false;
 	lastClockStepTriggerUs = 0;
 	clockStepSegmentIndex = -1;
+	clockStepSmoothedSpeed = 1.0f;
 	if (settings.clockStepMode) {
 		audioEngine.setPlaybackSpeed(1.0f);
 	}
@@ -242,7 +269,8 @@ void updateClockStepSpeedFromTrigger() {
 		return;
 	}
 
-	uint32_t triggerIntervalUs = nowUs - lastClockStepTriggerUs;
+	uint32_t previousTriggerUs = lastClockStepTriggerUs;
+	uint32_t triggerIntervalUs = nowUs - previousTriggerUs;
 	lastClockStepTriggerUs = nowUs;
 	if (triggerIntervalUs == 0) {
 		return;
@@ -253,12 +281,18 @@ void updateClockStepSpeedFromTrigger() {
 		return;
 	}
 
-	float speed = (float)segmentLengthUs / (float)triggerIntervalUs;
-	if (speed < 0.01f) {
-		speed = 0.01f;
+	float targetSpeed = (float)segmentLengthUs / (float)triggerIntervalUs;
+	if (targetSpeed < 0.01f) {
+		targetSpeed = 0.01f;
 	}
 
-	audioEngine.setPlaybackSpeed(speed);
+	if (previousTriggerUs == 0) {
+		clockStepSmoothedSpeed = targetSpeed;
+	} else {
+		clockStepSmoothedSpeed = (clockStepSmoothedSpeed * 0.75f) + (targetSpeed * 0.25f);
+	}
+
+	audioEngine.setPlaybackSpeed(clockStepSmoothedSpeed);
 }
 
 bool advanceToNextClockSegment() {
@@ -275,6 +309,11 @@ bool advanceToNextClockSegment() {
 	if (settings.clockStepMode) {
 		if (clockStepSegmentIndex < 0 || clockStepSegmentIndex >= divide) {
 			clockStepSegmentIndex = currentSegment;
+		} else {
+			uint32_t forwardDistance = (currentSegment + divide - (uint32_t)clockStepSegmentIndex) % divide;
+			if (forwardDistance > 1 && forwardDistance < (uint32_t)(divide / 2)) {
+				clockStepSegmentIndex = currentSegment;
+			}
 		}
 		clockStepSegmentIndex = (clockStepSegmentIndex + 1) % divide;
 	} else {
@@ -282,6 +321,18 @@ bool advanceToNextClockSegment() {
 	}
 
 	uint32_t nextSegment = (uint32_t)clockStepSegmentIndex;
+	if (settings.clockStepMode && nextSegment == 0) {
+		ledControl.showReset(true);
+		resetLedTimer = 0;
+	}
+	if (settings.clockStepMode && nextSegment == 0 && (sampleChangePending || bankChangePending)) {
+		ledControl.showReset(true);
+		resetLedTimer = 0;
+		lastSegIndex = UINT32_MAX;
+		forceFirstClock = true;
+		applyPendingSelectionChangeNow();
+		return true;
+	}
 	uint32_t nextStart = ((uint64_t)nextSegment * 8192UL) / divide;
 
 	lastSegIndex = nextSegment;
@@ -461,27 +512,7 @@ void loop() {
 		lastSegIndex = UINT32_MAX; // ★ ループ先頭で必ずクロックを出す
 		forceFirstClock = true;   // ★ 追加
 
-		if(sampleChangePending) {
-			playState.channelChanged = true;
-			audioEngine.skipTo(0);  // サンプルリスタート
-			lastSegIndex = UINT32_MAX;
-			sampleChangePending = false;
-			flashLeds = false;
-		}
-
-		if(bankChangePending) {
-			if(nextBankIndex >= 0 && nextBankIndex <= fileScanner.lastBankIndex) {
-				playState.bank = nextBankIndex;
-				if (playState.nextChannel >= fileScanner.numFilesInBank[playState.bank])
-					playState.nextChannel = fileScanner.numFilesInBank[playState.bank] - 1;
-
-				interface.setChannelCount(fileScanner.numFilesInBank[playState.bank]);
-				playState.channelChanged = true;
-				// EEPROM.write(EEPROM_BANK_SAVE_ADDRESS, playState.bank);
-			}
-			bankChangePending = false;
-			flashLeds = false;   // LED点滅終了
-		}
+		applyPendingSelectionChangeNow();
 		}
 
 	}

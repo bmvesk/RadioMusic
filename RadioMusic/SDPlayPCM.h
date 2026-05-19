@@ -66,6 +66,7 @@ public:
 	volatile uint16_t bufferFills = 0;
 	volatile uint16_t updates = 0;
 	volatile uint16_t errors = 0;
+	bool useOffsetLookahead = true;
 
 	File rawfile;
 	volatile bool inUpdate = false;

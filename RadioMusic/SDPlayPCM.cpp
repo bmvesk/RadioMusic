@@ -843,8 +843,11 @@ bool SDPlayPCM::fillBuffer(int32_t requiredBytes) {
 
 // Progress in file scaled from 0 to 1
 float SDPlayPCM::offset(void) {
-	// For now fudge it a bit and shift it forward in time by 2 blocks.
-	uint32_t bytes = bytesLeftInFile <= (bytesRequired * 2) ? bytesLeftInFile : bytesLeftInFile - (bytesRequired * 2);
+	uint32_t bytes = bytesLeftInFile;
+	if (useOffsetLookahead) {
+		// Shift slightly forward to compensate for buffered audio already queued for playback.
+		bytes = bytesLeftInFile <= (bytesRequired * 2) ? bytesLeftInFile : bytesLeftInFile - (bytesRequired * 2);
+	}
 	float off = (float)(dataSize - bytes) / dataSize;
 	D(
 		debugHeader();

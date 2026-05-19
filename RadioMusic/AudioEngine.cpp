@@ -17,6 +17,8 @@ void AudioEngine::init(Settings& config) {
 
 	playRaw1.loopPlayback(settings->looping);
 	playRaw2.loopPlayback(settings->looping);
+	playRaw1.useOffsetLookahead = !settings->clockStepMode;
+	playRaw2.useOffsetLookahead = !settings->clockStepMode;
 
 	mixer.gain(0, 1.0);
 	mixer.gain(1, 1.0);
@@ -105,7 +107,9 @@ void AudioEngine::changeTo(AudioFileInfo* fileInfo, unsigned long start) {
 
 	uint32_t pos = 0;
 
-	if (settings->looping && currentFileInfo != NULL) {
+	if (settings->clockStepMode) {
+		pos = 0;
+	} else if (settings->looping && currentFileInfo != NULL) {
 		D(
 			Serial.print("Elapsed ");
 			Serial.println(elapsed);
