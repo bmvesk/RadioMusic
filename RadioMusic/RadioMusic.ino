@@ -222,8 +222,24 @@ bool applyPendingSelectionChangeNow() {
 	return true;
 }
 
+void applyChannelChangeNow() {
+	playState.currentChannel = playState.nextChannel;
+
+	AudioFileInfo* currentFileInfo = &fileScanner.fileInfos[playState.bank][playState.nextChannel];
+
+	audioEngine.changeTo(currentFileInfo, interface.start);
+	lastSegIndex = UINT32_MAX;
+	playState.channelChanged = false;
+
+	resetLedTimer = 0;
+
+	fileMillis = currentFileInfo->getFileLengthMillis();
+	divideReload = true;
+	resetClockStepSync();
+}
+
 void handleClockStepTrigger() {
-	if (settings.resetIsOutput) {
+	if (settings.resetIsOutput && !settings.clockStepMode) {
 		digitalWrite(RESET_CV, HIGH);
 		clockHighStartMs = millis();
 		clockHigh = true;
@@ -231,6 +247,26 @@ void handleClockStepTrigger() {
 	}
 	updateClockStepSpeedFromTrigger();
 	advanceToNextClockSegment();
+}
+
+void handleClockStepReset(uint16_t changes) {
+	resetClockStepSync();
+	clockHigh = false;
+	forceFirstClock = false;
+	forceFirstClockDelayActive = false;
+	resetLedTimer = 0;
+	ledControl.showReset(true);
+	lastSegIndex = UINT32_MAX;
+
+	if ((changes & CHANNEL_CHANGED) || playState.nextChannel != playState.currentChannel || sampleChangePending || bankChangePending) {
+		if (applyPendingSelectionChangeNow()) {
+			applyChannelChangeNow();
+		}
+		return;
+	}
+
+	suppressSeekedLoopHandling = true;
+	audioEngine.skipTo(0);
 }
 
 void resetClockStepSync() {
@@ -475,19 +511,7 @@ void loop() {
 		Serial.println("");
 		);
 
-		playState.currentChannel = playState.nextChannel;
-
-		AudioFileInfo* currentFileInfo = &fileScanner.fileInfos[playState.bank][playState.nextChannel];
-
-		audioEngine.changeTo(currentFileInfo, interface.start);
-		lastSegIndex = UINT32_MAX;
-		playState.channelChanged = false;
-
-		resetLedTimer = 0;
-
-		fileMillis = currentFileInfo->getFileLengthMillis();
-		divideReload = true;
-		resetClockStepSync();
+		applyChannelChangeNow();
 	}
 
 	// indexマッピング
@@ -530,13 +554,13 @@ void loop() {
 	// =====================================
 
 	// HIGH中に分割数が変わったら、パルス幅を即座に再計算
-	if (clockHigh && divide != lastDivideForPulse && fileMillis > 0) {
+	if (!settings.clockStepMode && clockHigh && divide != lastDivideForPulse && fileMillis > 0) {
 		uint32_t intervalMs = fileMillis / divide;
 		currentClockPulseWidthMs = intervalMs / 2;
 		lastDivideForPulse = divide;
 	}
 
-	if (fileMillis > 0 && divide > 0 && !(settings.clockStepMode && clockStepSyncActive)) {
+	if (!settings.clockStepMode && fileMillis > 0 && divide > 0) {
 
 		uint32_t playheadMs = audioEngine.getPlayheadMillis();
 
@@ -586,7 +610,7 @@ void loop() {
 
 
 	// ---- パルスOFF ----
-	if (clockHigh) {
+	if (!settings.clockStepMode && clockHigh) {
 		// HIGH開始から現在までの経過（ミリ秒）
 		uint32_t elapsedMs = millis() - clockHighStartMs;
 		if (elapsedMs >= currentClockPulseWidthMs) {
@@ -712,6 +736,7 @@ uint16_t checkInterface() {
 
 	uint16_t changes = interface.update();
 	changes |= interface.updateChannelCVTrigger();
+	bool consumedClockStepReset = false;
 
 	#ifdef RESET_TO_REBOOT
 	if (changes & BUTTON_SHORT_PRESS) {
@@ -743,6 +768,7 @@ uint16_t checkInterface() {
 	}
 
 	boolean resetTriggered = changes & RESET_TRIGGERED;
+	boolean resetCvTriggered = changes & RESET_CV_TRIGGERED;
 
 	bool skipToStartPoint = false;
 	bool speedChange = false;
@@ -766,15 +792,14 @@ uint16_t checkInterface() {
 	}
 
 	if(resetTriggered) {
-		if((changes & CHANNEL_CHANGED) || playState.nextChannel != playState.currentChannel) {
+		if(settings.clockStepMode && resetCvTriggered) {
+			handleClockStepReset(changes);
+			consumedClockStepReset = true;
+		} else if((changes & CHANNEL_CHANGED) || playState.nextChannel != playState.currentChannel) {
 			// playState.channelChanged = true;
 			sampleChangePending = true;
 		} else {
-			if(settings.clockStepMode) {
-				handleClockStepTrigger();
-			} else {
-				resetLedTimer = 0;
-			}
+			resetLedTimer = 0;
 		}
 	}
 
@@ -789,7 +814,7 @@ uint16_t checkInterface() {
 		}
 	}
 
-	if (changes & CHANNEL_CV_TRIGGERED) {
+	if ((changes & CHANNEL_CV_TRIGGERED) && !consumedClockStepReset) {
 		if (settings.clockStepMode) {
 			handleClockStepTrigger();
 		} else {

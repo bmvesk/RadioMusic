@@ -23,10 +23,11 @@ void Interface::init(int fileSize, int channels, const Settings& settings, PlayS
 
     analogReadRes(ADC_BITS);
 	pinMode(RESET_BUTTON, OUTPUT);
-	pinMode(RESET_CV, settings.resetIsOutput ? OUTPUT : INPUT);
+	bool useResetCvAsOutput = settings.resetIsOutput && !settings.clockStepMode;
+	pinMode(RESET_CV, useResetCvAsOutput ? OUTPUT : INPUT);
 
 	// Add an interrupt on the RESET_CV pin to catch rising edges
-	if (!settings.resetIsOutput){
+	if (!useResetCvAsOutput){
 		attachInterrupt(RESET_CV, resetcv, RISING);
 	}
 
@@ -94,7 +95,12 @@ uint16_t Interface::update() {
 	changes |= startChanged;
 	changes |= updateButton();
 
-	if(resetCVHigh || (changes & BUTTON_SHORT_PRESS)) {
+	if(resetCVHigh) {
+		changes |= RESET_CV_TRIGGERED;
+		changes |= RESET_TRIGGERED;
+	}
+
+	if(changes & BUTTON_SHORT_PRESS) {
 		changes |= RESET_TRIGGERED;
 	}
 	resetCVHigh = false;
