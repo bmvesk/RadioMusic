@@ -54,6 +54,9 @@ public:
 	// Advance playback to the next clock segment on each reset trigger.
 	boolean clockStepMode = false;
 
+	// In clockStepMode, optionally restore playback speed to 1.0 when sync resets.
+	boolean clockStepResetSpeedToOriginal = true;
+
 	// If this is true we'll read any .wav files and try to play them
 	// if not we'll only play 44khz, 16bit mono files
 	boolean anyAudioFiles = true;

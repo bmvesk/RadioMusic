@@ -18,6 +18,9 @@ Clock Step Mode
 
 add 'clockStepMode=1' to the config.
 
+Optional: add 'clockStepResetSpeedToOriginal=0' to keep the current playback speed when clock-step sync resets.
+When set to 1, sync resets return playback speed to the original 1.0 speed before re-syncing to incoming triggers.
+
 In clockStepMode each retrigger advances playback to the next clock segment instead of jumping back to the start.
 The TIME control is also used for speed control in this mode.
 

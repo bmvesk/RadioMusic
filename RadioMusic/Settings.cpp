@@ -218,6 +218,10 @@ void Settings::applySetting(String settingName, String settingValue) {
 		clockStepMode = toBoolean(settingValue);
 	}
 
+	if(settingName.equalsIgnoreCase("clockStepResetSpeedToOriginal")) {
+		clockStepResetSpeedToOriginal = toBoolean(settingValue);
+	}
+
 	if(settingName.equalsIgnoreCase("hardSwap")) {
 		hardSwap = toBoolean(settingValue);
 	}
@@ -299,6 +303,8 @@ void Settings::write() {
 	settingsFile.println(pitchMode);
 	settingsFile.print("clockStepMode=");
 	settingsFile.println(clockStepMode);
+	settingsFile.print("clockStepResetSpeedToOriginal=");
+	settingsFile.println(clockStepResetSpeedToOriginal);
 	// close the file:
 	settingsFile.close();
 }

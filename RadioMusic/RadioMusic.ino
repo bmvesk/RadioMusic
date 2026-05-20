@@ -113,6 +113,7 @@ uint32_t lastClockStepTriggerUs = 0;
 int32_t clockStepSegmentIndex = -1;
 int lastClockStepDivide = -1;
 float clockStepSmoothedSpeed = 1.0f;
+bool clockStepResetSegmentPending = false;
 
 
 int prevBankTimer = 0;
@@ -222,7 +223,20 @@ bool applyPendingSelectionChangeNow() {
 	return true;
 }
 
-void applyChannelChangeNow() {
+void syncClockStepResetToNow() {
+	float retainedSpeed = audioEngine.currentPlayer != NULL ? audioEngine.currentPlayer->playbackSpeed : 1.0f;
+	if (retainedSpeed < 0.01f) {
+		retainedSpeed = 1.0f;
+	}
+
+	clockStepSyncActive = true;
+	lastClockStepTriggerUs = micros();
+	clockStepSegmentIndex = -1;
+	clockStepSmoothedSpeed = settings.clockStepResetSpeedToOriginal ? 1.0f : retainedSpeed;
+	audioEngine.setPlaybackSpeed(clockStepSmoothedSpeed);
+}
+
+void applyChannelChangeNow(bool preserveClockStepTiming = false) {
 	playState.currentChannel = playState.nextChannel;
 
 	AudioFileInfo* currentFileInfo = &fileScanner.fileInfos[playState.bank][playState.nextChannel];
@@ -235,7 +249,11 @@ void applyChannelChangeNow() {
 
 	fileMillis = currentFileInfo->getFileLengthMillis();
 	divideReload = true;
-	resetClockStepSync();
+	if (preserveClockStepTiming && settings.clockStepMode) {
+		syncClockStepResetToNow();
+	} else {
+		resetClockStepSync();
+	}
 }
 
 void handleClockStepTrigger() {
@@ -250,7 +268,8 @@ void handleClockStepTrigger() {
 }
 
 void handleClockStepReset(uint16_t changes) {
-	resetClockStepSync();
+	syncClockStepResetToNow();
+	clockStepResetSegmentPending = true;
 	clockHigh = false;
 	forceFirstClock = false;
 	forceFirstClockDelayActive = false;
@@ -260,7 +279,7 @@ void handleClockStepReset(uint16_t changes) {
 
 	if ((changes & CHANNEL_CHANGED) || playState.nextChannel != playState.currentChannel || sampleChangePending || bankChangePending) {
 		if (applyPendingSelectionChangeNow()) {
-			applyChannelChangeNow();
+			applyChannelChangeNow(true);
 		}
 		return;
 	}
@@ -270,12 +289,18 @@ void handleClockStepReset(uint16_t changes) {
 }
 
 void resetClockStepSync() {
+	float retainedSpeed = audioEngine.currentPlayer != NULL ? audioEngine.currentPlayer->playbackSpeed : 1.0f;
+	if (retainedSpeed < 0.01f) {
+		retainedSpeed = 1.0f;
+	}
+
 	clockStepSyncActive = false;
 	lastClockStepTriggerUs = 0;
 	clockStepSegmentIndex = -1;
-	clockStepSmoothedSpeed = 1.0f;
+	clockStepResetSegmentPending = false;
+	clockStepSmoothedSpeed = settings.clockStepResetSpeedToOriginal ? 1.0f : retainedSpeed;
 	if (settings.clockStepMode) {
-		audioEngine.setPlaybackSpeed(1.0f);
+		audioEngine.setPlaybackSpeed(clockStepSmoothedSpeed);
 	}
 }
 
@@ -343,7 +368,10 @@ bool advanceToNextClockSegment() {
 	}
 
 	if (settings.clockStepMode) {
-		if (clockStepSegmentIndex < 0 || clockStepSegmentIndex >= divide) {
+		if (clockStepResetSegmentPending) {
+			clockStepSegmentIndex = 0;
+			clockStepResetSegmentPending = false;
+		} else if (clockStepSegmentIndex < 0 || clockStepSegmentIndex >= divide) {
 			clockStepSegmentIndex = currentSegment;
 		} else {
 			uint32_t forwardDistance = (currentSegment + divide - (uint32_t)clockStepSegmentIndex) % divide;
