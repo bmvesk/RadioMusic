@@ -62,6 +62,7 @@ void Interface::init(int fileSize, int channels, const Settings& settings, PlayS
 
 	channelPotImmediate = settings.chanPotImmediate;
 	channelCVImmediate = settings.chanCVImmediate;
+	channelCVInput.setSmoothSteps(1);
 
 	startPotImmediate = settings.startPotImmediate;
 	startCVImmediate = settings.startCVImmediate;
@@ -286,24 +287,23 @@ uint16_t Interface::updateButton() {
 }
 
 uint16_t Interface::updateChannelCVTrigger() {
+	channelCVInput.update();
 
-	boolean channelCVChanged = channelCVInput.update();
+	static boolean triggerHigh = false;
+	const int triggerHighThreshold = 1800;
+	const int triggerLowThreshold = 1200;
 
-    static int lastValue = 0;
-    const int threshold = 205; // 1V 相当（12bit ADC: 4096 * 1/5 ≈ 819 → Teensyの3.3Vなら約205）
+	int value = channelCVInput.inputValue;
+	uint16_t changes = 0;
 
-    int value = channelCVInput.inputValue;
-    uint16_t changes = 0;
-
-	if(channelCVChanged) {
-		// 立ち上がり検出
-		if (lastValue < threshold && value >= threshold) {
-			changes |= CHANNEL_CV_TRIGGERED;
-		}
+	if (!triggerHigh && value >= triggerHighThreshold) {
+		triggerHigh = true;
+		changes |= CHANNEL_CV_TRIGGERED;
+	} else if (triggerHigh && value <= triggerLowThreshold) {
+		triggerHigh = false;
 	}
 
-    lastValue = value;
-    return changes;
+	return changes;
 }
 
 
